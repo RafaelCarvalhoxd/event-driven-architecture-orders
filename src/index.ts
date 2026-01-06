@@ -4,6 +4,7 @@ import { connectDatabase } from "./infra/db/postgres/postgres";
 import { HttpError } from "./helpers/errors/errors";
 import { inventoryRouter } from "./apps/inventory/handler/inventory.handler";
 import { ordersRouter } from "./apps/orders/handler/orders.handler";
+import { connectRabbitMQ } from "./infra/messaging/rabbitmq/connection";
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.use(errorHandler);
 async function startServer(): Promise<void> {
   try {
     await connectDatabase();
+    await connectRabbitMQ();
     app.listen(env.port, () => {
       console.log(`🚀 Server is running on port ${env.port}`);
     });
