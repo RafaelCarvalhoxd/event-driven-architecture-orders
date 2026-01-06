@@ -19,4 +19,15 @@ export const env = {
     user: process.env.MAIL_USER || "your-email@gmail.com",
     pass: process.env.MAIL_PASS || "your-password",
   },
+  messaging: {
+    rabbitmq: {
+      url:
+        process.env.RABBITMQ_URL ||
+        `amqp://${process.env.RABBITMQ_USERNAME || "guest"}:${
+          process.env.RABBITMQ_PASSWORD || "guest"
+        }@${process.env.RABBITMQ_HOST || "localhost"}:${
+          process.env.RABBITMQ_PORT || 5672
+        }`,
+    },
+  },
 };
