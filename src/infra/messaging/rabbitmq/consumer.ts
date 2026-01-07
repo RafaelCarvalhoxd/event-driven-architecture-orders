@@ -1,11 +1,14 @@
 import { Channel, ConsumeMessage } from "amqplib";
 import { connectRabbitMQ } from "./connection";
+import { Idempotency } from "../idempotency/idempotency";
+import { infraLogger } from "../../logger/logger";
 
 export interface ConsumeOptions {
   exchange?: string;
   routingKey?: string;
   noAck?: boolean;
   prefetch?: number;
+  enableIdempotency?: boolean;
 }
 
 export type MessageHandler = (
@@ -13,8 +16,17 @@ export type MessageHandler = (
   rawMessage: ConsumeMessage
 ) => Promise<void> | void;
 
+interface MessageWithMetadata {
+  _metadata?: {
+    messageId: string;
+    timestamp: number;
+  };
+  [key: string]: unknown;
+}
+
 export class RabbitMQConsumer {
   private channel: Channel | null = null;
+  private readonly idempotency = new Idempotency();
 
   async connect(): Promise<void> {
     this.channel = await connectRabbitMQ();
@@ -29,7 +41,13 @@ export class RabbitMQConsumer {
       this.channel = await connectRabbitMQ();
     }
 
-    const { exchange, routingKey, noAck = false, prefetch = 1 } = options;
+    const {
+      exchange,
+      routingKey,
+      noAck = false,
+      prefetch = 1,
+      enableIdempotency = true,
+    } = options;
 
     await this.channel.prefetch(prefetch);
 
@@ -48,14 +66,49 @@ export class RabbitMQConsumer {
         }
 
         try {
-          const message = JSON.parse(rawMessage.content.toString());
-          await handler(message, rawMessage);
+          const parsedMessage = JSON.parse(
+            rawMessage.content.toString()
+          ) as MessageWithMetadata;
+
+          if (enableIdempotency && parsedMessage._metadata?.messageId) {
+            const messageId = parsedMessage._metadata.messageId;
+
+            const isNewMessage = await this.idempotency.checkAndMark(messageId);
+
+            if (!isNewMessage) {
+              infraLogger.rabbitmq.warn(
+                {
+                  messageId,
+                  queue,
+                  routingKey: rawMessage.fields.routingKey,
+                },
+                "Mensagem duplicada ignorada"
+              );
+              if (!noAck) {
+                this.channel?.ack(rawMessage);
+              }
+              return;
+            }
+          }
+
+          const { _metadata, ...message } = parsedMessage;
+          const cleanMessage =
+            Object.keys(message).length > 0 ? message : parsedMessage;
+
+          await handler(cleanMessage, rawMessage);
 
           if (!noAck) {
             this.channel?.ack(rawMessage);
           }
         } catch (error) {
-          console.error(`Error processing message from queue ${queue}:`, error);
+          infraLogger.rabbitmq.error(
+            {
+              queue,
+              routingKey: rawMessage.fields.routingKey,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "Erro ao processar mensagem"
+          );
 
           if (!noAck) {
             this.channel?.nack(rawMessage, false, false);
@@ -65,7 +118,15 @@ export class RabbitMQConsumer {
       { noAck }
     );
 
-    console.log(`✅ Consumer started for queue: ${queue}`);
+    infraLogger.rabbitmq.info(
+      {
+        queue,
+        exchange,
+        routingKey,
+        enableIdempotency,
+      },
+      "Consumer iniciado"
+    );
   }
 
   async assertQueue(
