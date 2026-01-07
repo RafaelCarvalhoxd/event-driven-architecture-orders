@@ -1,14 +1,17 @@
 import { Channel } from "amqplib";
 import { connectRabbitMQ } from "./connection";
+import { Idempotency } from "../idempotency/idempotency";
 
 export interface PublishOptions {
   exchange?: string;
   routingKey?: string;
   persistent?: boolean;
+  messageId?: string;
 }
 
 export class RabbitMQPublisher {
   private channel: Channel | null = null;
+  private readonly idempotency = new Idempotency();
 
   async connect(): Promise<void> {
     this.channel = await connectRabbitMQ();
@@ -27,9 +30,22 @@ export class RabbitMQPublisher {
       exchange = "",
       routingKey = queueOrExchange,
       persistent = true,
+      messageId,
     } = options;
 
-    const messageBuffer = Buffer.from(JSON.stringify(message));
+    const finalMessageId = messageId || this.idempotency.generateMessageId();
+
+    const messageWithMetadata = {
+      ...(typeof message === "object" && message !== null
+        ? message
+        : { data: message }),
+      _metadata: {
+        messageId: finalMessageId,
+        timestamp: Date.now(),
+      },
+    };
+
+    const messageBuffer = Buffer.from(JSON.stringify(messageWithMetadata));
 
     if (exchange) {
       return this.channel.publish(exchange, routingKey, messageBuffer, {
