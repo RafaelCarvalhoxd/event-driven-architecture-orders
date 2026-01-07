@@ -1,5 +1,6 @@
 import amqp, { Channel } from "amqplib";
 import { env } from "../../env/env";
+import { infraLogger } from "../../logger/logger";
 
 type RabbitMQConnection = Awaited<ReturnType<typeof amqp.connect>>;
 
@@ -16,24 +17,33 @@ export async function connectRabbitMQ(): Promise<Channel> {
     channel = await connection.createChannel();
 
     connection.on("error", (err: Error) => {
-      console.error("RabbitMQ connection error:", err);
+      infraLogger.rabbitmq.error(
+        { error: err.message },
+        "Erro na conexão RabbitMQ"
+      );
       connection = null;
       channel = null;
     });
 
     connection.on("close", () => {
-      console.log("RabbitMQ connection closed");
+      infraLogger.rabbitmq.warn("Conexão RabbitMQ fechada");
       connection = null;
       channel = null;
     });
 
-    console.log("✅ Connected to RabbitMQ");
+    infraLogger.rabbitmq.info("Conectado ao RabbitMQ");
     if (!channel) {
       throw new Error("Failed to create channel");
     }
     return channel;
   } catch (error) {
-    console.error("Failed to connect to RabbitMQ:", error);
+    infraLogger.rabbitmq.error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        url: env.messaging.rabbitmq.url.replace(/:[^:]*@/, ":****@"),
+      },
+      "Falha ao conectar ao RabbitMQ"
+    );
     connection = null;
     channel = null;
     throw error;
