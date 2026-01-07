@@ -4,6 +4,7 @@ import { PaymentService } from "./service/payment.service";
 import { SimulatedPaymentGateway } from "./gateway/payment.gateway";
 import { RabbitMQPublisher } from "../../infra/messaging/rabbitmq/publisher";
 import { OrdersRepository } from "../orders/repository/orders.repository";
+import { orders } from "../orders/orders";
 import { InventoryRepository } from "../inventory/repository/inventory.repository";
 
 export const payment = {
@@ -12,12 +13,14 @@ export const payment = {
     const paymentGateway = new SimulatedPaymentGateway();
     const rabbitMQPublisher = new RabbitMQPublisher();
     const ordersRepository = new OrdersRepository(db);
+    const ordersService = orders.createOrdersService();
     const inventoryRepository = new InventoryRepository(db);
     return new PaymentService(
       paymentRepository,
       paymentGateway,
       rabbitMQPublisher,
       ordersRepository,
+      ordersService,
       inventoryRepository
     );
   },

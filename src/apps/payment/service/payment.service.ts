@@ -10,6 +10,7 @@ import {
 } from "../events/payment.events";
 import { serviceLogger } from "../../../infra/logger/logger";
 import { OrdersRepository } from "../../orders/repository/orders.repository";
+import { OrdersService } from "../../orders/service/orders.service";
 import { InventoryRepository } from "../../inventory/repository/inventory.repository";
 import { BadRequestError } from "../../../helpers/errors/errors";
 
@@ -19,6 +20,7 @@ export class PaymentService {
     private readonly paymentGateway: PaymentGateway,
     private readonly rabbitMQPublisher: RabbitMQPublisher,
     private readonly ordersRepository: OrdersRepository,
+    private readonly ordersService: OrdersService,
     private readonly inventoryRepository: InventoryRepository
   ) {}
 
@@ -44,9 +46,22 @@ export class PaymentService {
       const missingProductNames = missingProducts
         .map((item) => item.product.name)
         .join(", ");
-      throw new BadRequestError(
-        `Não é possível processar o pagamento. Alguns produtos não foram reservados ou as reservas expiraram: ${missingProductNames}`
+      const cancelReason = `Não é possível processar o pagamento. Alguns produtos não foram reservados ou as reservas expiraram: ${missingProductNames}`;
+
+      serviceLogger.payment.warn(
+        {
+          orderId: data.orderId,
+          missingProducts: missingProducts.map((item) => ({
+            productId: item.product.id,
+            productName: item.product.name,
+          })),
+        },
+        "Cancelando pedido: reservas inválidas ou expiradas"
       );
+
+      await this.ordersService.cancelOrder(data.orderId, cancelReason);
+
+      throw new BadRequestError(cancelReason);
     }
 
     const payment = await this.paymentRepository.createPayment({

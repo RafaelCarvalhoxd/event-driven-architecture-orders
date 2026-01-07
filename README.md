@@ -37,13 +37,6 @@ Este projeto implementa um sistema de pedidos onde os serviços se comunicam de 
        │ Publica evento
        ▼
 ┌─────────────────────┐
-│   RabbitMQ          │
-│   Exchange: orders  │
-│   Key: order.created│
-└──────┬──────────────┘
-       │
-       ▼
-┌─────────────────────┐
 │ Inventory Worker    │
 │ Consome OrderCreated│
 └──────┬──────────────┘
@@ -56,12 +49,14 @@ Este projeto implementa um sistema de pedidos onde os serviços se comunicam de 
        │ Sim                         │ Não
        ▼                             ▼
 ┌─────────────────────┐      ┌──────────────────────┐
-│ Reserva produto      │      │ Log erro             │
-│ Status: PENDING      │      │ Continua próximo item│
-│ Expira em 30min      │      └──────────────────────┘
-└──────┬──────────────┘
+│ Reserva produto      │      │ Libera reservas      │
+│ Status: PENDING      │      │ parciais             │
+│ Expira em 30min      │      │ Cancela pedido       │
+└──────┬──────────────┘      │ Publica OrderCancelled│
+       │                      └──────────────────────┘
        │
        │ Todos processados
+       │ com sucesso
        ▼
 ┌─────────────────────┐
 │ ⏳ Aguarda pagamento │
@@ -71,9 +66,21 @@ Este projeto implementa um sistema de pedidos onde os serviços se comunicam de 
        ▼
 ┌─────────────────────┐
 │ Payment Service     │
-│ Cria pagamento      │
-│ Status: PENDING     │
+│ Valida reservas     │
+│ válidas?            │
 └──────┬──────────────┘
+       │
+    ┌──┴──┐
+    │     │
+   Sim   Não
+    │     │
+    ▼     ▼
+┌─────────────┐  ┌─────────────────┐
+│ Cria        │  │ Cancela pedido  │
+│ pagamento   │  │ Publica          │
+│ Status:     │  │ OrderCancelled  │
+│ PENDING     │  └─────────────────┘
+└──────┬──────┘
        │
        ▼
 ┌─────────────────────┐
@@ -203,13 +210,21 @@ Este projeto implementa um sistema de pedidos onde os serviços se comunicam de 
 - Consome `OrderCreated`
 - Reserva produtos do pedido
 - Valida disponibilidade de estoque
-- Se estoque insuficiente, loga erro e continua com próximo item
+- Se estoque insuficiente para algum produto:
+  - Libera reservas parciais já feitas
+  - Cancela o pedido automaticamente
+  - Publica `OrderCancelled`
 
 ### 3. Cliente processa pagamento
 
 - Cliente faz `POST /api/v1/payments` com `orderId` e `amount`
-- Payment Service processa pagamento via gateway
-- Publica `PaymentConfirmed` ou `PaymentFailed` no Message Broker
+- Payment Service valida se há reservas válidas (não expiradas) para todos os produtos
+- Se reservas inválidas ou expiradas:
+  - Cancela o pedido automaticamente
+  - Publica `OrderCancelled`
+- Se reservas válidas:
+  - Processa pagamento via gateway
+  - Publica `PaymentConfirmed` ou `PaymentFailed` no Message Broker
 
 ### 4. Confirmação do pedido (Fluxo de Sucesso)
 
@@ -229,13 +244,29 @@ Este projeto implementa um sistema de pedidos onde os serviços se comunicam de 
 - Consome `OrderConfirmed`
 - Envia email de confirmação ao cliente
 
-### 5. Cancelamento (Fluxo de Erro)
+### 5. Cancelamento (Fluxos de Erro)
 
-**Orders Worker:**
+**Cenários de cancelamento automático:**
 
-- Consome `PaymentFailed`
-- Atualiza pedido para `CANCELLED`
-- Publica `OrderCancelled`
+1. **Falta de estoque (Inventory Worker):**
+
+   - Inventory Worker detecta estoque insuficiente
+   - Libera reservas parciais já feitas
+   - Cancela pedido automaticamente
+   - Publica `OrderCancelled`
+
+2. **Reservas inválidas/expiradas (Payment Service):**
+
+   - Payment Service detecta reservas inválidas ou expiradas
+   - Cancela pedido automaticamente
+   - Publica `OrderCancelled`
+
+3. **Pagamento rejeitado (Orders Worker):**
+   - Orders Worker consome `PaymentFailed`
+   - Atualiza pedido para `CANCELLED`
+   - Publica `OrderCancelled`
+
+**Processamento do cancelamento:**
 
 **Inventory Worker:**
 
