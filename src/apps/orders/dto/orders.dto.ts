@@ -4,7 +4,6 @@ import { OrderStatus } from "../enums/order-status.enum";
 const orderItemSchema = z.object({
   product: z.object({
     id: z.uuid("Product ID must be a valid UUID"),
-    name: z.string().min(1, "Product name is required"),
   }),
   quantity: z.number().positive("Quantity must be a positive number"),
   price: z.number().positive("Price must be a positive number"),

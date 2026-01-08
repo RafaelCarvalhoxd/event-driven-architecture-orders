@@ -98,7 +98,6 @@ export class OrdersRepository {
     items: Array<{
       product: {
         id: string;
-        name: string;
       };
       quantity: number;
       price: number;
